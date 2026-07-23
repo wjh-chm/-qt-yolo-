@@ -1,0 +1,51 @@
+# Build outputs
+build/
+bin/
+debug/
+release/
+
+# IDE / local config
+.qtcreator/
+.codex_tmp/
+tmp/
+*.pro.user
+*.pro.user.*
+*.creator
+*.creator.user
+*.files
+*.includes
+*.config
+
+# Qt generated files
+Makefile
+Makefile.*
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.moc
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.lib
+*.dll
+*.exp
+*.ilk
+*.pdb
+*.idb
+*.exe
+
+# Temporary / logs
+*.log
+*.tmp
+*.temp
+*.cache
+*.bak
+*.user
+~$*
+
+# Large demo resources excluded for now
+video/

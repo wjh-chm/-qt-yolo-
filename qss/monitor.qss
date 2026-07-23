@@ -1,0 +1,77 @@
+*{
+    margin:0;
+    padding:0;
+}
+
+#left_box{
+    border-right:2px solid white;
+    min-width:200px;
+}
+
+#device_list{
+    color:white;
+    font-size:20pt;
+    font-weight:bold;
+
+    border:none;
+    border-bottom:2px solid white;
+    padding-bottom:10px;
+}
+/*基础样式，设置列表整体外观*/
+QListWidget{
+    background-color: #f5f5f5;
+    border:none;
+    padding:5px;
+    outline:none;
+    font-size:14pt;
+}
+/*列表条目基础样式*/
+QListWidget::item{
+    height:42px;/*配合字体增大。适当增加条目高度*/
+    padding:0  12px;/*增加内边距，避免文字拥挤*/
+    color:black;
+    text-align:left;
+    /*单独设置*/
+    font-size:14pt;
+}
+
+QListWidget::item:hover{
+    background-color:#D9D9D9;
+    color:#404244;
+}
+/*选中状态*/
+QListWidget::item:selected{
+    background-color:#CCE8FF;
+    color:#404244;
+    border-left:3px solid #1a73e8;
+}
+
+QListWidget:disabled{
+    background-color:#f0f0f0;
+    border-color:#e0e0e0;
+}
+
+QListWidget:disabled::item{
+    background-color:transparent;
+    color:#b0b0b0;
+}
+
+#video_view{
+    background-color:#111820;
+    border:1px solid #314252;
+    color:#d8e5ef;
+    font-size:18pt;
+}
+
+#monitor_status{
+    color:white;
+    font-size:13pt;
+    padding:6px 4px;
+}
+
+QPushButton{
+    min-width:92px;
+    min-height:36px;
+    padding:4px 10px;
+    font-size:12pt;
+}

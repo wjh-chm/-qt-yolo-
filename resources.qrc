@@ -1,0 +1,16 @@
+<RCC>
+    <qresource prefix="/">
+        <file>image/jiankong.png</file>
+        <file>image/login.jpg</file>
+        <file>image/login.png</file>
+        <file>image/nocamera.png</file>
+        <file>image/R.jpg</file>
+        <file>image/shezhi.png</file>
+        <file>image/shipin.png</file>
+        <file>image/w1.png</file>
+        <file>image/w4 .png</file>
+        <file>qss/main.qss</file>
+        <file>qss/monitor.qss</file>
+        <file>image/back.jpg</file>
+    </qresource>
+</RCC>
