@@ -6,8 +6,12 @@ release/
 
 # IDE / local config
 .qtcreator/
+.qtc_clangd/
 .codex_tmp/
 tmp/
+output/
+tmp_pdf_path.txt
+.qmake.stash
 *.pro.user
 *.pro.user.*
 *.creator

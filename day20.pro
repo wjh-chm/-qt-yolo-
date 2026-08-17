@@ -7,46 +7,68 @@ CONFIG += c++17
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
-    main.cpp \
-    service/detectask.cpp \
-    util/appsettings.cpp \
-    model/usermodel.cpp \
-    model/video.cpp \
-    model/videomodel.cpp \
-    service/monitortask.cpp \
-    service/recordtask.cpp \
-    service/userservice.cpp \
-    util/dbconn.cpp \
-    util/winmannager.cpp \
-    view/loginwidget.cpp \
-    view/mainwidget.cpp \
-    view/monitorwidget.cpp \
-    view/registerwidget.cpp \
-    view/reviewwidget.cpp \
-    view/selectrl.cpp \
-    view/settingwidget.cpp \
-    view/verifycodelabel.cpp
+    src/main.cpp \
+    tool/src/Detect.cpp \
+    tool/src/YOLO.cpp \
+    src/view/exceptionwidget.cpp \
+    src/model/exception.cpp \
+    src/model/exceptionmodel.cpp \
+    src/model/image.cpp \
+    src/model/imagemodel.cpp \
+    src/model/logmodel.cpp \
+    src/service/detectask.cpp \
+    src/util/appsettings.cpp \
+    src/model/usermodel.cpp \
+    src/model/video.cpp \
+    src/model/videomodel.cpp \
+    src/service/monitortask.cpp \
+    src/service/recordtask.cpp \
+    src/service/userservice.cpp \
+    src/util/dbconnectionpool.cpp \
+    src/util/dbconn.cpp \
+    src/util/winmannager.cpp \
+    src/view/loginwidget.cpp \
+    src/view/logwidget.cpp \
+    src/view/mainwidget.cpp \
+    src/view/monitorwidget.cpp \
+    src/view/registerwidget.cpp \
+    src/view/detailwidget.cpp \
+    src/view/reviewwidget.cpp \
+    src/view/selectrl.cpp \
+    src/view/settingwidget.cpp \
+    src/view/verifycodelabel.cpp
 
 
 HEADERS += \
-    service/detectask.h \
-    util/appsettings.h \
-    model/usermodel.h \
-    model/video.h \
-    model/videomodel.h \
-    service/monitortask.h \
-    service/recordtask.h \
-    service/userservice.h \
-    util/dbconn.h \
-    util/winmannager.h \
-    view/loginwidget.h \
-    view/mainwidget.h \
-    view/monitorwidget.h \
-    view/registerwidget.h \
-    view/reviewwidget.h \
-    view/selectrl.h \
-    view/settingwidget.h \
-    view/verifycodelabel.h
+    src/view/exceptionwidget.h \
+    src/model/exception.h \
+    src/model/exceptionmodel.h \
+    src/model/image.h \
+    src/model/imagemodel.h \
+    src/model/logmodel.h \
+    src/service/detectask.h \
+    src/util/appsettings.h \
+    src/model/usermodel.h \
+    src/model/video.h \
+    src/model/videomodel.h \
+    src/service/monitortask.h \
+    src/service/recordtask.h \
+    src/service/userservice.h \
+    src/util/dbconnectionpool.h \
+    src/util/dbconn.h \
+    src/util/winmannager.h \
+    src/view/loginwidget.h \
+    src/view/logwidget.h \
+    src/view/mainwidget.h \
+    src/view/monitorwidget.h \
+    src/view/registerwidget.h \
+    src/view/detailwidget.h \
+    src/view/reviewwidget.h \
+    src/view/selectrl.h \
+    src/view/settingwidget.h \
+    src/view/verifycodelabel.h\
+    tool/include/Detect.h\
+    tool/include/YOLO.h
 
 
 # Default rules for deployment.
@@ -58,6 +80,8 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 OPENCV_ROOT=D:/opencv
 #OPENCV头文件
 INCLUDEPATH+=$${OPENCV_ROOT}/include
+INCLUDEPATH += $$PWD/src
+INCLUDEPATH += $$PWD/tool/include
 #opencv库文件
 LIBS+=-L$${OPENCV_ROOT}/x64/mingw/lib
 
@@ -79,3 +103,5 @@ DESTDIR=$$PWD/bin
 
 RESOURCES += \
     resources.qrc
+TARGET=VideoPlayer
+
