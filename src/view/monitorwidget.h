@@ -1,9 +1,6 @@
 #ifndef MONITORWIDGET_H
 #define MONITORWIDGET_H
 
-#include "model/exceptionmodel.h"
-#include "model/imagemodel.h"
-#include "model/videomodel.h"
 #include "service/detectask.h"
 #include "service/monitortask.h"
 
@@ -13,6 +10,8 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -26,6 +25,8 @@
 
 #include <array>
 
+class ClientApi;
+
 class Monitorwidget : public QWidget
 {
     Q_OBJECT
@@ -34,6 +35,7 @@ public:
     explicit Monitorwidget(QWidget *parent = nullptr);
     ~Monitorwidget() override;
 
+    void setClientApi(ClientApi *api);
     void setLoginUser(const QString &username);
     bool isLoggedIn() const;
     void init_leftwidget();
@@ -93,9 +95,7 @@ private:
     QString m_recordRoot;
     int m_segmentDurationSeconds;
     QString m_loginUser;
-    VideoModel m_videoModel;
-    ImageModel m_imageModel;
-    ExceptionModel m_exceptionModel;
+    ClientApi *m_clientApi = nullptr;
     int m_selectedChannel;
     bool m_recording;
     bool m_detecting;
@@ -117,6 +117,8 @@ public slots:
     void on_anomaly_session_ready(const Exception &exception,
                                   const Video &video,
                                   const ImageList &images);
+    void onInsertVideoFinished(qint64 requestId, bool success, int videoId, const QString &message);
+    void onAnomalySessionFinished(qint64 requestId, bool success, int exceptionId, const QString &message);
     void reloadStorageSettings();
     void slotDetectToggle(Qt::CheckState state);
 };

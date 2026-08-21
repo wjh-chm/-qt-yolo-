@@ -8,6 +8,7 @@ CONFIG += c++17
 
 SOURCES += \
     src/main.cpp \
+    src/net/clientapi.cpp \
     tool/src/Detect.cpp \
     tool/src/YOLO.cpp \
     src/view/exceptionwidget.cpp \
@@ -40,6 +41,7 @@ SOURCES += \
 
 
 HEADERS += \
+    src/net/clientapi.h \
     src/view/exceptionwidget.h \
     src/model/exception.h \
     src/model/exceptionmodel.h \

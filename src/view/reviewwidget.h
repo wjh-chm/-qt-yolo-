@@ -1,10 +1,9 @@
 #ifndef REVIEWWIDGET_H
 #define REVIEWWIDGET_H
-
+#include <QJsonArray>
+#include <QJsonObject>
 #include "detailwidget.h"
 
-#include "model/imagemodel.h"
-#include "model/videomodel.h"
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDateEdit>
@@ -20,6 +19,8 @@
 #include <QVideoWidget>
 #include <QWidget>
 
+class ClientApi;
+
 class ReviewWidget : public QWidget
 {
     Q_OBJECT
@@ -33,8 +34,8 @@ public:
     explicit ReviewWidget(ReviewScope scope = ReviewScope::NormalOnly, QWidget *parent = nullptr);
 
     void loadPageData(int page);
-    int getTotalCount();
     void refreshData();
+    void setClientApi(ClientApi *api);
 
 private:
     enum class RecordMode {
@@ -57,8 +58,6 @@ private:
     void switchRecordMode(RecordMode mode);
     void loadVideoPageData(int page);
     void loadImagePageData(int page);
-    int getVideoTotalCount() const;
-    int getImageTotalCount() const;
     void insertFeatureImageRecord(const QString &filePath);
     void showEmptyPlaceholder(const QString &text);
     QString scopeTitle() const;
@@ -77,6 +76,19 @@ private:
     int m_curPage;
     int m_totalPage;
     int channelid;
+    bool m_waitingVideoList = false;//状态变量防止多个回放界面都收到同一个响应
+    bool m_waitingImageList = false; //等待标志，等待连接成功
+    bool m_waitingInsertImage = false;
+    bool m_waitingDeleteImages = false;
+    bool m_waitingRelatedVideo = false;
+    qint64 m_videoListRequestId = 0;
+    qint64 m_imageListRequestId = 0;
+    qint64 m_insertImageRequestId = 0;
+    qint64 m_deleteImagesRequestId = 0;
+    qint64 m_relatedVideoRequestId = 0;
+    QDateTime m_pendingRelatedCaptureTime;
+    QList<DetailImageItem> m_pendingDeleteImages;
+    ClientApi *m_clientApi = nullptr;
 
     QDateEdit *m_edit_date;
     QComboBox *m_box_channel;
@@ -108,12 +120,35 @@ private:
     QString currentPath;
     QString m_loadedPath;
     QImage m_lastVideoFrame;
-    ImageModel m_imageModel;
-    VideoModel m_videoModel;
 
 private slots:
     void itemselected(QListWidgetItem *item);
     void onsavedClicked();
+    void onVideoListFinished(qint64 requestId,
+                             bool success,
+                             const QJsonArray &list,
+                             int totalCount,
+                             const QString &message);
+
+    void onImageListFinished(qint64 requestId,
+                             bool success,
+                             const QJsonArray &list,
+                             int totalCount,
+                             const QString &message);
+
+    void onRelatedVideoFinished(qint64 requestId,
+                                bool success,
+                                const QJsonObject &record,
+                                const QString &message);
+
+    void onInsertImageFinished(qint64 requestId,
+                               bool success,
+                               int imageId,
+                               const QString &message);
+
+    void onDeleteImagesFinished(qint64 requestId,
+                                bool success,
+                                const QString &message);
 };
 
 #endif

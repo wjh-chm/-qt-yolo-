@@ -1,16 +1,22 @@
 #include "reviewwidget.h"
 
+#include "net/clientapi.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QMessageBox>
 #include <QSignalBlocker>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QVideoFrame>
 #include <QVideoSink>
+
+#include <utility>
 
 ReviewWidget::ReviewWidget(ReviewScope scope, QWidget *parent)
     : QWidget(parent),
@@ -23,7 +29,8 @@ ReviewWidget::ReviewWidget(ReviewScope scope, QWidget *parent)
 {
     initUI();
     m_edit_date->setDate(resolveInitialFilterDate());
-    loadPageData(m_curPage);
+    m_btn_prev->setEnabled(false);
+    m_btn_next->setEnabled(false);
 
     connect(m_btn_next, &QPushButton::clicked, this, [this]() {
         if (m_curPage < m_totalPage) {
@@ -101,6 +108,48 @@ ReviewWidget::ReviewWidget(ReviewScope scope, QWidget *parent)
                 btn_play->setText(state == QMediaPlayer::PlayingState ? QStringLiteral("暂停")
                                                                       : QStringLiteral("播放"));
             });
+}
+
+void ReviewWidget::setClientApi(ClientApi *api)
+{
+    if (m_clientApi == api) {
+        return;
+    }
+
+    if (m_clientApi != nullptr) {
+        disconnect(m_clientApi, nullptr, this, nullptr);
+    }
+
+    m_clientApi = api;
+    if (m_clientApi == nullptr) {
+        return;
+    }
+
+    connect(m_clientApi,
+            &ClientApi::videoListFinished,
+            this,
+            &ReviewWidget::onVideoListFinished,
+            Qt::UniqueConnection);
+    connect(m_clientApi,
+            &ClientApi::imageListFinished,
+            this,
+            &ReviewWidget::onImageListFinished,
+            Qt::UniqueConnection);
+    connect(m_clientApi,
+            &ClientApi::relatedVideoFinished,
+            this,
+            &ReviewWidget::onRelatedVideoFinished,
+            Qt::UniqueConnection);
+    connect(m_clientApi,
+            &ClientApi::deleteImagesFinished,
+            this,
+            &ReviewWidget::onDeleteImagesFinished,
+            Qt::UniqueConnection);
+    connect(m_clientApi,
+            &ClientApi::insertImageFinished,
+            this,
+            &ReviewWidget::onInsertImageFinished,
+            Qt::UniqueConnection);
 }
 
 void ReviewWidget::initUI()
@@ -361,11 +410,6 @@ void ReviewWidget::onsavedClicked()
     QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("截图保存成功"));
 }
 
-int ReviewWidget::getTotalCount()
-{
-    return m_recordMode == RecordMode::Video ? getVideoTotalCount() : getImageTotalCount();
-}
-
 void ReviewWidget::refreshData()
 {
     resetCurrentPreviewState();
@@ -445,10 +489,7 @@ void ReviewWidget::resetCurrentPreviewState()
 
 QDate ReviewWidget::resolveInitialFilterDate() const
 {
-    const QDate latestDate = m_recordMode == RecordMode::Video
-                                 ? m_videoModel.latestDate(isAnomalyScope())
-                                 : m_imageModel.latestDate(isAnomalyScope());
-    return latestDate.isValid() ? latestDate : QDate::currentDate();
+    return QDate::currentDate();
 }
 
 void ReviewWidget::switchRecordMode(RecordMode mode)
@@ -467,124 +508,205 @@ void ReviewWidget::switchRecordMode(RecordMode mode)
 
 void ReviewWidget::loadVideoPageData(int page)
 {
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("服务端未连接"));
+        return;
+    }
+
     m_list_record->clear();
+    m_detail_widget->clear();
+    m_curPage = qMax(1, page);
+    m_totalPage = qMax(1, m_curPage);
+    m_lab_page->setText(QStringLiteral("加载中..."));
+    m_btn_prev->setEnabled(false);
+    m_btn_next->setEnabled(false);
 
-    const int total = getVideoTotalCount();
-    m_totalPage = qMax(1, (total + m_pageSize - 1) / m_pageSize);
-    m_curPage = page;
-    m_lab_page->setText(QString("页 %1 / %2").arg(m_curPage).arg(m_totalPage));
-    m_btn_prev->setEnabled(m_curPage > 1);
-    m_btn_next->setEnabled(m_curPage < m_totalPage);
-
-    const int offset = (m_curPage - 1) * m_pageSize;
-    const QList<VideoModel::VideoRecord> records =
-        m_videoModel.queryPageByDate(selectedDateStart(),
-                                     selectedDateEnd(),
-                                     selectedChannelFilter(),
-                                     isAnomalyScope(),
-                                     offset,
-                                     m_pageSize);
-
-    bool hasResult = false;
-    for (const VideoModel::VideoRecord &record : records) {
-        hasResult = true;
-        const QString text =
-            QString("通道 %1  %2").arg(record.channelId).arg(record.startTime.toString("yyyyMMddHHmmss"));
-
-        QListWidgetItem *item = new QListWidgetItem(text);
-        item->setData(Qt::UserRole, record.filePath);
-        item->setData(Qt::UserRole + 1, record.id);
-        item->setData(Qt::UserRole + 2, record.channelId);
-        item->setData(Qt::UserRole + 3, record.videoName);
-        item->setData(Qt::UserRole + 4, record.endTime.toString("yyyy-MM-dd HH:mm:ss"));
-        m_list_record->addItem(item);
-    }
-
-    if (!hasResult) {
-        showEmptyPlaceholder(QString("%1下暂无视频").arg(scopeTitle()));
-    }
+    const QString scope = isAnomalyScope() ? QStringLiteral("anomaly") : QStringLiteral("normal");
+    const QString date = m_edit_date->date().toString("yyyy-MM-dd");
+    m_waitingVideoList = true;
+    m_videoListRequestId = m_clientApi->queryVideoList(scope, date, selectedChannelFilter(), m_curPage, m_pageSize);
 }
 
 void ReviewWidget::loadImagePageData(int page)
 {
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("服务端未连接"));
+        return;
+    }
+
+    m_list_record->clear();
+    m_detail_widget->clear();
+    m_curPage = qMax(1, page);
+    m_totalPage = qMax(1, m_curPage);
+    m_lab_page->setText(QStringLiteral("加载中..."));
+    m_btn_prev->setEnabled(false);
+    m_btn_next->setEnabled(false);
+
+    const QString scope = isAnomalyScope() ? QStringLiteral("anomaly") : QStringLiteral("normal");
+    const QString date = m_edit_date->date().toString("yyyy-MM-dd");
+    m_waitingImageList = true;
+    m_imageListRequestId = m_clientApi->queryImageList(scope, date, selectedChannelFilter(), m_curPage, m_pageSize);
+}
+
+void ReviewWidget::onVideoListFinished(qint64 requestId,bool success,
+                                       const QJsonArray &list,
+                                       int totalCount,
+                                       const QString &message)
+{
+    if (!m_waitingVideoList || requestId != m_videoListRequestId) {
+        return;
+    }
+
+    m_waitingVideoList = false;
+    m_videoListRequestId = 0;
+    if (m_recordMode != RecordMode::Video) {
+        return;
+    }
+
     m_list_record->clear();
 
-    const int total = getImageTotalCount();
-    m_totalPage = qMax(1, (total + m_pageSize - 1) / m_pageSize);
-    m_curPage = page;
+    if (!success) {
+        showEmptyPlaceholder(message.isEmpty() ? QStringLiteral("视频查询失败") : message);
+        m_totalPage = qMax(1, m_curPage);
+        m_lab_page->setText(QString("页 %1 / %2").arg(m_curPage).arg(m_totalPage));
+        m_btn_prev->setEnabled(m_curPage > 1);
+        m_btn_next->setEnabled(false);
+        return;
+    }
+
+    for (const QJsonValue &value : list) {
+        const QJsonObject record = value.toObject();
+        const int id = record.value("id").toInt();
+        const int channelId = record.value("channel_id").toInt();
+        const QString videoName = record.value("video_name").toString();
+        const QString videoPath = record.value("video_path").toString();
+        const QString startTimeText = record.value("start_time").toString();
+        const QString endTimeText = record.value("end_time").toString();
+
+        const QDateTime startTime =
+            QDateTime::fromString(startTimeText, "yyyy-MM-dd HH:mm:ss");
+        const QString displayTime =
+            startTime.isValid() ? startTime.toString("yyyyMMddHHmmss") : startTimeText;
+
+        QListWidgetItem *item =
+            new QListWidgetItem(QString("通道 %1  %2").arg(channelId).arg(displayTime));
+        item->setData(Qt::UserRole, videoPath);
+        item->setData(Qt::UserRole + 1, id);
+        item->setData(Qt::UserRole + 2, channelId);
+        item->setData(Qt::UserRole + 3, videoName);
+        item->setData(Qt::UserRole + 4, endTimeText);
+        m_list_record->addItem(item);
+    }
+
+    if (list.isEmpty()) {
+        showEmptyPlaceholder(QString("%1下暂无视频").arg(scopeTitle()));
+    }
+
+    m_totalPage = qMax(1, (totalCount + m_pageSize - 1) / m_pageSize);
     m_lab_page->setText(QString("页 %1 / %2").arg(m_curPage).arg(m_totalPage));
     m_btn_prev->setEnabled(m_curPage > 1);
     m_btn_next->setEnabled(m_curPage < m_totalPage);
+}
 
-    const int offset = (m_curPage - 1) * m_pageSize;
-    const QList<Image> pageImages =
-        m_imageModel.queryPageByDate(selectedDateStart(),
-                                     selectedDateEnd(),
-                                     selectedChannelFilter(),
-                                     isAnomalyScope(),
-                                     offset,
-                                     m_pageSize);
+void ReviewWidget::onImageListFinished(qint64 requestId,bool success,
+                                       const QJsonArray &list,
+                                       int totalCount,
+                                       const QString &message)
+{
+    if (!m_waitingImageList || requestId != m_imageListRequestId) {
+        return;
+    }
+
+    m_waitingImageList = false;
+    m_imageListRequestId = 0;
+    if (m_recordMode != RecordMode::Image) {
+        return;
+    }
+
+    m_list_record->clear();
+    m_detail_widget->clear();
+
+    if (!success) {
+        showEmptyPlaceholder(message.isEmpty() ? QStringLiteral("图片查询失败") : message);
+        m_totalPage = qMax(1, m_curPage);
+        m_lab_page->setText(QString("页 %1 / %2").arg(m_curPage).arg(m_totalPage));
+        m_btn_prev->setEnabled(m_curPage > 1);
+        m_btn_next->setEnabled(false);
+        return;
+    }
 
     QList<DetailImageItem> images;
-    bool hasResult = false;
-    for (const Image &image : pageImages) {
-        hasResult = true;
-        QListWidgetItem *item = new QListWidgetItem(image.imageName());
-        item->setData(Qt::UserRole, image.imagePath());
-        item->setData(Qt::UserRole + 1, image.id());
-        item->setData(Qt::UserRole + 2, image.channelId());
-        item->setData(Qt::UserRole + 3, image.captureTime().toString("yyyy-MM-dd HH:mm:ss"));
-        m_list_record->addItem(item);
-
+    for (const QJsonValue &value : list) {
+        const QJsonObject image = value.toObject();
         DetailImageItem imageItem;
-        imageItem.imageId = image.id();
-        imageItem.channelId = image.channelId();
-        imageItem.exceptionId = image.exceptionId();
-        imageItem.imageName = image.imageName();
-        imageItem.imagePath = image.imagePath();
-        imageItem.captureTime = image.captureTime();
+        imageItem.imageId = image.value("id").toInt();
+        imageItem.channelId = image.value("channel_id").toInt();
+        imageItem.imageName = image.value("image_name").toString();
+        imageItem.imagePath = image.value("image_path").toString();
+        imageItem.captureTime =
+            QDateTime::fromString(image.value("capture_time").toString(),
+                                  "yyyy-MM-dd HH:mm:ss");
+        const QJsonValue exceptionValue = image.value("exception_id");
+        imageItem.exceptionId = exceptionValue.isNull() || exceptionValue.isUndefined()
+                                    ? -1
+                                    : exceptionValue.toInt(-1);
         images.append(imageItem);
+
+        QListWidgetItem *item = new QListWidgetItem(imageItem.imageName);
+        item->setData(Qt::UserRole, imageItem.imagePath);
+        item->setData(Qt::UserRole + 1, imageItem.imageId);
+        item->setData(Qt::UserRole + 2, imageItem.channelId);
+        item->setData(Qt::UserRole + 3,
+                      imageItem.captureTime.toString("yyyy-MM-dd HH:mm:ss"));
+        m_list_record->addItem(item);
     }
 
     m_detail_widget->setImages(images);
-
-    if (!hasResult) {
-        m_detail_widget->clear();
+    if (list.isEmpty()) {
         showEmptyPlaceholder(QString("%1下暂无图片").arg(scopeTitle()));
     }
-}
 
-int ReviewWidget::getVideoTotalCount() const
-{
-    return m_videoModel.countByDate(selectedDateStart(),
-                                    selectedDateEnd(),
-                                    selectedChannelFilter(),
-                                    isAnomalyScope());
-}
-
-int ReviewWidget::getImageTotalCount() const
-{
-    return m_imageModel.countByDate(selectedDateStart(),
-                                    selectedDateEnd(),
-                                    selectedChannelFilter(),
-                                    isAnomalyScope());
+    m_totalPage = qMax(1, (totalCount + m_pageSize - 1) / m_pageSize);
+    m_lab_page->setText(QString("页 %1 / %2").arg(m_curPage).arg(m_totalPage));
+    m_btn_prev->setEnabled(m_curPage > 1);
+    m_btn_next->setEnabled(m_curPage < m_totalPage);
 }
 
 void ReviewWidget::insertFeatureImageRecord(const QString &filePath)
 {
-    const QFileInfo fileInfo(filePath);
-    const QDateTime captureTime = QDateTime::currentDateTime();
-    const Image image(channelid,
-                      fileInfo.fileName(),
-                      filePath,
-                      captureTime,
-                      QDateTime::currentDateTime(),
-                      -1);
-
-    if (!m_imageModel.insertImage(image)) {
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
         QMessageBox::warning(this,
                              QStringLiteral("提示"),
-                             QStringLiteral("截图已保存，但 feature_image 写库失败"));
+                             QStringLiteral("截图已保存，但服务端未连接，图片记录未入库"));
+        return;
+    }
+
+    const QFileInfo fileInfo(filePath);
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+
+    m_waitingInsertImage = true;
+    m_insertImageRequestId = m_clientApi->insertImageRecord(channelid,
+                                                            fileInfo.fileName(),
+                                                            filePath,
+                                                            now,
+                                                            now,
+                                                            -1);
+}
+
+void ReviewWidget::onInsertImageFinished(qint64 requestId,bool success, int, const QString &message)
+{
+    if (!m_waitingInsertImage || requestId != m_insertImageRequestId) {
+        return;
+    }
+
+    m_waitingInsertImage = false;
+    m_insertImageRequestId = 0;
+
+    if (!success) {
+        QMessageBox::warning(this,
+                             QStringLiteral("提示"),
+                             message.isEmpty() ? QStringLiteral("截图已保存，但图片记录入库失败")
+                                               : message);
     }
 }
 
@@ -613,19 +735,52 @@ void ReviewWidget::openRelatedVideoForImage(int channelId, const QDateTime &capt
         return;
     }
 
-    const VideoModel::VideoRecord record =
-        m_videoModel.findCoveringVideo(channelId, captureTime, isAnomalyScope());
-    if (record.id <= 0 || record.filePath.isEmpty()) {
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("服务端未连接，无法查询关联视频"));
+        return;
+    }
+
+    const QString scope = isAnomalyScope() ? QStringLiteral("anomaly") : QStringLiteral("normal");
+    m_waitingRelatedVideo = true;
+    m_pendingRelatedCaptureTime = captureTime;
+    m_relatedVideoRequestId = m_clientApi->findRelatedVideo(scope,
+                                                            channelId,
+                                                            captureTime.toString("yyyy-MM-dd HH:mm:ss"));
+}
+
+void ReviewWidget::onRelatedVideoFinished(qint64 requestId,bool success,
+                                          const QJsonObject &record,
+                                          const QString &message)
+{
+    if (!m_waitingRelatedVideo || requestId != m_relatedVideoRequestId) {
+        return;
+    }
+
+    m_waitingRelatedVideo = false;
+    m_relatedVideoRequestId = 0;
+    if (!success || record.isEmpty()) {
         QMessageBox::information(this,
                                  QStringLiteral("提示"),
-                                 QStringLiteral("未查询到该图片对应的视频片段"));
+                                 message.isEmpty() ? QStringLiteral("未查询到该图片对应的视频片段")
+                                                   : message);
+        return;
+    }
+
+    const int channelId = record.value("channel_id").toInt();
+    const QString videoPath = record.value("video_path").toString();
+    const QString startTimeText = record.value("start_time").toString();
+    const QDateTime startTime =
+        QDateTime::fromString(startTimeText, "yyyy-MM-dd HH:mm:ss");
+
+    if (videoPath.isEmpty() || !startTime.isValid()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("关联视频数据不完整"));
         return;
     }
 
     {
         const QSignalBlocker blockDate(m_edit_date);
         const QSignalBlocker blockChannel(m_box_channel);
-        m_edit_date->setDate(captureTime.date());
+        m_edit_date->setDate(m_pendingRelatedCaptureTime.date());
         const int targetIndex = m_box_channel->findData(channelId);
         if (targetIndex >= 0) {
             m_box_channel->setCurrentIndex(targetIndex);
@@ -635,19 +790,10 @@ void ReviewWidget::openRelatedVideoForImage(int channelId, const QDateTime &capt
     m_recordMode = RecordMode::Video;
     resetCurrentPreviewState();
     m_preview_stack->setCurrentWidget(m_video_page);
-    loadPageData(1);
-
-    for (int row = 0; row < m_list_record->count(); ++row) {
-        QListWidgetItem *item = m_list_record->item(row);
-        if (item != nullptr && item->data(Qt::UserRole).toString() == record.filePath) {
-            m_list_record->setCurrentItem(item);
-            break;
-        }
-    }
-
     channelid = channelId;
-    currentPath = record.filePath;
-    openVideoAtTimestamp(record.filePath, record.startTime, captureTime);
+    currentPath = videoPath;
+    loadPageData(1);
+    openVideoAtTimestamp(videoPath, startTime, m_pendingRelatedCaptureTime);
 }
 
 void ReviewWidget::openVideoAtTimestamp(const QString &videoPath,
@@ -718,13 +864,35 @@ void ReviewWidget::deleteImages(const QList<DetailImageItem> &images)
         return;
     }
 
-    if (!m_imageModel.deleteImagesByIds(imageIds)) {
-        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("图片数据库记录删除失败"));
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("服务端未连接，图片数据库记录未删除"));
+        return;
+    }
+
+    m_pendingDeleteImages = images;
+    m_waitingDeleteImages = true;
+    m_deleteImagesRequestId = m_clientApi->deleteImagesByIds(imageIds);
+}
+
+void ReviewWidget::onDeleteImagesFinished(qint64 requestId,bool success, const QString &message)
+{
+    if (!m_waitingDeleteImages || requestId != m_deleteImagesRequestId) {
+        return;
+    }
+
+    m_waitingDeleteImages = false;
+    m_deleteImagesRequestId = 0;
+
+    if (!success) {
+        m_pendingDeleteImages.clear();
+        QMessageBox::warning(this,
+                             QStringLiteral("提示"),
+                             message.isEmpty() ? QStringLiteral("图片数据库记录删除失败") : message);
         return;
     }
 
     int fileFailedCount = 0;
-    for (const DetailImageItem &image : images) {
+    for (const DetailImageItem &image : std::as_const(m_pendingDeleteImages)) {
         if (image.imagePath.isEmpty()) {
             continue;
         }
@@ -734,10 +902,9 @@ void ReviewWidget::deleteImages(const QList<DetailImageItem> &images)
         }
     }
 
+    m_pendingDeleteImages.clear();
     currentPath.clear();
-    const int total = getImageTotalCount();
-    const int totalPage = qMax(1, (total + m_pageSize - 1) / m_pageSize);
-    loadPageData(qMin(m_curPage, totalPage));
+    loadPageData(m_curPage);
 
     if (fileFailedCount > 0) {
         QMessageBox::warning(this,

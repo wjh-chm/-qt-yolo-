@@ -17,6 +17,8 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+class ClientApi;
+
 class MainWidget : public QWidget
 {
     Q_OBJECT
@@ -29,6 +31,7 @@ public:
     void init_connect();
     void init_showtime();
     bool isLoggedIn() const;
+    void setClientApi(ClientApi *api);
 
 public slots:
     void login();

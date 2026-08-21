@@ -3,44 +3,44 @@
 
 #include "verifycodelabel.h"
 
-#include "service/userservice.h"
-#include "util/dbconn.h"
-
-#include <QBrush>
-#include <QDebug>
-#include <QFormLayout>
-#include <QHBoxLayout>
-#include <QLabel>
 #include <QLineEdit>
-#include <QMessageBox>
-#include <QPalette>
-#include <QPixmap>
 #include <QPushButton>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QVBoxLayout>
+#include <QString>
 #include <QWidget>
 
-// 登录窗口：先校验验证码，再把账号密码校验交给 UserService。
+class ClientApi;
+
 class LoginWidget : public QWidget
 {
     Q_OBJECT
-private:
-    QPushButton *btn_login;
-    QLineEdit *edit_user;
-    QLineEdit *edit_pwd;
-    QLineEdit *l_vode;
-    VerifyCodeLabel *m_verifyLabel;
 
 public:
     explicit LoginWidget(QWidget *parent = nullptr);
+
     void init_connect();
+    void setClientApi(ClientApi *api);
 
 signals:
     void login_sucess(QString);
 
 public slots:
     void login();
+    void onLoginFinished(qint64 requestId,
+                         bool success,
+                         const QString &message);
+    void onNetworkError(const QString &message);
+
+private:
+    QPushButton *btn_login = nullptr;
+    QLineEdit *edit_user = nullptr;
+    QLineEdit *edit_pwd = nullptr;
+    QLineEdit *l_vode = nullptr;
+    VerifyCodeLabel *m_verifyLabel = nullptr;
+    ClientApi *m_clientApi = nullptr;
+    QString m_pendingUsername;
+    bool m_loginRequesting = false;
+    qint64 m_loginRequestId = 0;
+
 };
 
 #endif // LOGINWIDGET_H

@@ -1,5 +1,6 @@
 #include "monitorwidget.h"
 
+#include "net/clientapi.h"
 #include "util/appsettings.h"
 
 #include <QCoreApplication>
@@ -65,6 +66,33 @@ Monitorwidget::Monitorwidget(QWidget *parent)
 Monitorwidget::~Monitorwidget()
 {
     stopAllChannels();
+}
+
+void Monitorwidget::setClientApi(ClientApi *api)
+{
+    if (m_clientApi == api) {
+        return;
+    }
+
+    if (m_clientApi != nullptr) {
+        disconnect(m_clientApi, nullptr, this, nullptr);
+    }
+
+    m_clientApi = api;
+    if (m_clientApi == nullptr) {
+        return;
+    }
+
+    connect(m_clientApi,
+            &ClientApi::insertVideoFinished,
+            this,
+            &Monitorwidget::onInsertVideoFinished,
+            Qt::UniqueConnection);
+    connect(m_clientApi,
+            &ClientApi::anomalySessionFinished,
+            this,
+            &Monitorwidget::onAnomalySessionFinished,
+            Qt::UniqueConnection);
 }
 
 void Monitorwidget::setLoginUser(const QString &username)
@@ -522,7 +550,20 @@ void Monitorwidget::saveVideoRecord(int channelId,
                 filePath,
                 startTime,
                 endTime);
-    m_videoModel.insertVideo(video);
+
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
+        if (lab_status != nullptr) {
+            lab_status->setText(QStringLiteral("video saved locally, but server is not connected"));
+        }
+        return;
+    }
+
+    m_clientApi->insertVideoRecord(video.channelId(),
+                                   video.videoName(),
+                                   video.filePath(),
+                                   video.startTime().toString("yyyy-MM-dd HH:mm:ss"),
+                                   video.endTime().toString("yyyy-MM-dd HH:mm:ss"),
+                                   QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
 }
 
 void Monitorwidget::swtich_to_channel1()
@@ -652,45 +693,66 @@ void Monitorwidget::on_anomaly_session_ready(const Exception &exception,
         return;
     }
 
-    const int exceptionId = m_exceptionModel.insertException(exception);
-    if (exceptionId <= 0) {
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
         if (lab_status != nullptr) {
-            lab_status->setText(QStringLiteral("anomaly database insert failed: exception_log"));
+            lab_status->setText(QStringLiteral("anomaly saved locally, but server is not connected"));
         }
         return;
     }
 
-    Video anomalyVideo(video.channelId(),
-                       video.videoName(),
-                       video.filePath(),
-                       video.startTime(),
-                       video.endTime(),
-                       exceptionId);
-    if (!m_videoModel.insertVideo(anomalyVideo) && lab_status != nullptr) {
-        lab_status->setText(QStringLiteral("anomaly database insert failed: video"));
+    QJsonObject exceptionData;
+    exceptionData["channel_id"] = exception.channelId();
+    exceptionData["event_time"] = exception.eventTime().toString("yyyy-MM-dd HH:mm:ss");
+    exceptionData["related_videopath"] =
+        exception.relatedVideoPath().isEmpty() ? video.filePath() : exception.relatedVideoPath();
+
+    QJsonObject videoData;
+    videoData["channel_id"] = video.channelId();
+    videoData["video_name"] = video.videoName();
+    videoData["video_path"] = video.filePath();
+    videoData["start_time"] = video.startTime().toString("yyyy-MM-dd HH:mm:ss");
+    videoData["end_time"] = video.endTime().toString("yyyy-MM-dd HH:mm:ss");
+    videoData["create_time"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+
+    QJsonArray imageArray;
+    for (const Image &image : images) {
+        QJsonObject imageData;
+        imageData["channel_id"] = image.channelId();
+        imageData["image_name"] = image.imageName();
+        imageData["image_path"] = image.imagePath();
+        imageData["capture_time"] = image.captureTime().toString("yyyy-MM-dd HH:mm:ss");
+        imageData["create_time"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+        imageArray.append(imageData);
     }
 
-    bool imageInsertFailed = false;
-    for (const Image &image : images) {
-        Image anomalyImage(image.channelId(),
-                           image.imageName(),
-                           image.imagePath(),
-                           image.captureTime(),
-                           QDateTime::currentDateTime(),
-                           exceptionId);
-        if (!m_imageModel.insertImage(anomalyImage)) {
-            imageInsertFailed = true;
-        }
-    }
+    m_clientApi->insertAnomalySession(exceptionData, videoData, imageArray);
 
     if (lab_status != nullptr) {
-        if (imageInsertFailed) {
-            lab_status->setText(QStringLiteral("anomaly saved, but some image records failed"));
-        } else {
-            lab_status->setText(QString("%1: anomaly session saved")
-                                    .arg(channelName(video.channelId() - 1)));
-        }
+        lab_status->setText(QStringLiteral("anomaly session uploaded to server"));
     }
+}
+
+void Monitorwidget::onInsertVideoFinished(qint64, bool success, int, const QString &message)
+{
+    if (!success && lab_status != nullptr) {
+        lab_status->setText(message.isEmpty() ? QStringLiteral("video database insert failed")
+                                              : message);
+    }
+}
+
+void Monitorwidget::onAnomalySessionFinished(qint64, bool success, int exceptionId, const QString &message)
+{
+    if (lab_status == nullptr) {
+        return;
+    }
+
+    if (!success) {
+        lab_status->setText(message.isEmpty() ? QStringLiteral("anomaly session insert failed")
+                                              : message);
+        return;
+    }
+
+    lab_status->setText(QStringLiteral("anomaly session saved, exception id: %1").arg(exceptionId));
 }
 
 void Monitorwidget::reloadStorageSettings()

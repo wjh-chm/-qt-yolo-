@@ -1,6 +1,7 @@
 #include "winmannager.h"
 
-// 统一持有登录窗口和主窗口的全局管理对象。
+#include "net/clientapi.h"
+
 WinMannager *WinMannager::instence = nullptr;
 
 WinMannager *WinMannager::getInstence()
@@ -13,4 +14,12 @@ WinMannager *WinMannager::getInstence()
 
 WinMannager::WinMannager()
 {
+    m_clientApi = new ClientApi(&mainwidget);
+    loginwidget.setClientApi(m_clientApi);
+    mainwidget.setClientApi(m_clientApi);
+}
+
+ClientApi *WinMannager::clientApi() const
+{
+    return m_clientApi;
 }

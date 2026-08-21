@@ -1,5 +1,6 @@
 #include "mainwidget.h"
 
+#include "net/clientapi.h"
 #include "util/winmannager.h"
 
 #include <QIcon>
@@ -92,6 +93,22 @@ void MainWidget::init_qss()
 bool MainWidget::isLoggedIn() const
 {
     return !m_loginUser.isEmpty();
+}
+
+void MainWidget::setClientApi(ClientApi *api)
+{
+    if (m_widget != nullptr) {
+        m_widget->setClientApi(api);
+    }
+    if (m_review_widget != nullptr) {
+        m_review_widget->setClientApi(api);
+    }
+    if (m_exception_widget != nullptr) {
+        m_exception_widget->setClientApi(api);
+    }
+    if (m_log_widget != nullptr) {
+        m_log_widget->setClientApi(api);
+    }
 }
 
 void MainWidget::login()

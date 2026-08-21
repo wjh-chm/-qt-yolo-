@@ -1,8 +1,13 @@
 #include "logwidget.h"
+#include "net/clientapi.h"
 
+#include <QJsonObject>
+#include <QMessageBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QVBoxLayout>
+#include <QDebug>
+
 
 LogWidget::LogWidget(QWidget *parent)
     : QWidget(parent),
@@ -12,18 +17,39 @@ LogWidget::LogWidget(QWidget *parent)
       m_btn_prev(nullptr),
       m_btn_next(nullptr),
       m_lab_page(nullptr),
-      m_mode(LogModel::Mode::Operation),
+      m_mode(Mode::Operation),
       m_pageSize(8),
       m_curPage(1),
       m_totalPage(1)
 {
     initUi();
-    refreshLogs();
 }
 
 void LogWidget::refreshLogs()
 {
     loadPage(1);
+}
+
+void LogWidget::setClientApi(ClientApi *api)
+{
+    if (m_clientApi == api) {
+        return;
+    }
+
+    if (m_clientApi != nullptr) {
+        disconnect(m_clientApi, nullptr, this, nullptr);
+    }
+
+    m_clientApi = api;
+    if (m_clientApi == nullptr) {
+        return;
+    }
+
+    connect(m_clientApi,
+            &ClientApi::logListFinished,
+            this,
+            &LogWidget::onLogListFinished,
+            Qt::UniqueConnection);
 }
 
 void LogWidget::initUi()
@@ -53,10 +79,7 @@ void LogWidget::initUi()
 
     m_table = new QTableWidget(this);
     m_table->setColumnCount(4);
-    m_table->setHorizontalHeaderLabels({QStringLiteral("日志ID"),
-                                        QStringLiteral("日志操作"),
-                                        QStringLiteral("操作员"),
-                                        QStringLiteral("操作时间")});
+    updateTableHeader();
     m_table->setRowCount(m_pageSize);
     m_table->verticalHeader()->setVisible(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -84,11 +107,13 @@ void LogWidget::initUi()
     mainLayout->addWidget(rightPanel, 1);
 
     connect(m_btn_operation, &QPushButton::clicked, this, [this]() {
-        m_mode = LogModel::Mode::Operation;
+        m_mode = Mode::Operation;
+        updateTableHeader();
         loadPage(1);
     });
     connect(m_btn_exception, &QPushButton::clicked, this, [this]() {
-        m_mode = LogModel::Mode::Exception;
+        m_mode = Mode::Exception;
+        updateTableHeader();
         loadPage(1);
     });
     connect(m_btn_prev, &QPushButton::clicked, this, [this]() {
@@ -107,37 +132,112 @@ void LogWidget::initUi()
 
 void LogWidget::loadPage(int page)
 {
-    const int count = m_logModel.count(m_mode);
-    m_totalPage = qMax(1, (count + m_pageSize - 1) / m_pageSize);
-    m_curPage = qBound(1, page, m_totalPage);
+    if (m_clientApi == nullptr || !m_clientApi->isConnected()) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("服务端未连接"));
+        return;
+    }
+
+    m_curPage = qMax(1, page);
 
     m_table->clearContents();
     m_table->setRowCount(m_pageSize);
 
-    const int offset = (m_curPage - 1) * m_pageSize;
-    const QList<LogModel::Record> records = m_logModel.queryPage(m_mode, offset, m_pageSize);
+    m_lab_page->setText(QStringLiteral("加载中..."));
+    m_btn_prev->setEnabled(false);
+    m_btn_next->setEnabled(false);
 
-    int row = 0;
-    for (const LogModel::Record &record : records) {
-        if (row >= m_pageSize) {
-            break;
-        }
-
-        m_table->setItem(row, 0, new QTableWidgetItem(QString::number(record.id)));
-        m_table->setItem(row, 1, new QTableWidgetItem(record.operation));
-        m_table->setItem(row, 2, new QTableWidgetItem(record.operatorId));
-        m_table->setItem(row, 3, new QTableWidgetItem(record.operateTime));
-        ++row;
+    QString modeText;
+    if (m_mode == Mode::Exception) {
+        modeText = QStringLiteral("exception");
+    } else {
+        modeText = QStringLiteral("operation");
     }
 
-    m_lab_page->setText(QString("%1 / %2").arg(m_curPage).arg(m_totalPage));
-    m_btn_prev->setEnabled(m_curPage > 1);
-    m_btn_next->setEnabled(m_curPage < m_totalPage);
+    m_waitingLogList = true;
+    m_logListRequestId = m_clientApi->queryLogList(modeText, m_curPage, m_pageSize);//发送请求
+
     updateModeButtonState();
 }
 
 void LogWidget::updateModeButtonState()
 {
-    m_btn_operation->setEnabled(m_mode != LogModel::Mode::Operation);
-    m_btn_exception->setEnabled(m_mode != LogModel::Mode::Exception);
+    m_btn_operation->setEnabled(m_mode != Mode::Operation);
+    m_btn_exception->setEnabled(m_mode != Mode::Exception);
+}
+
+void LogWidget::updateTableHeader()
+{
+    if (m_mode == Mode::Exception) {
+        m_table->setHorizontalHeaderLabels({
+            QStringLiteral("日志ID"),
+            QStringLiteral("通道"),
+            QStringLiteral("相关视频路径"),
+            QStringLiteral("发生时间")
+        });
+    } else {
+        m_table->setHorizontalHeaderLabels({
+            QStringLiteral("日志ID"),
+            QStringLiteral("日志操作"),
+            QStringLiteral("操作员"),
+            QStringLiteral("操作时间")
+        });
+    }
+}
+
+void LogWidget::onLogListFinished(qint64 requestId,
+                                  bool success,
+                                  const QJsonArray &list,
+                                  int totalCount,
+                                  const QString &message)
+{
+    if (!m_waitingLogList || requestId != m_logListRequestId) {
+        return;
+    }
+
+    m_waitingLogList = false;
+    m_logListRequestId = 0;
+
+    if (!success) {
+        QMessageBox::warning(this,
+                             QStringLiteral("查询失败"),
+                             message.isEmpty() ? QStringLiteral("日志查询失败") : message);
+
+        m_lab_page->setText(QString("%1 / ?").arg(m_curPage));
+        m_btn_prev->setEnabled(m_curPage > 1);
+        m_btn_next->setEnabled(false);
+        return;
+    }
+    m_table->clearContents();
+    m_table->setRowCount(m_pageSize);
+    int row = 0;
+
+    for (const QJsonValue &value : list) {
+        if (row >= m_pageSize) {
+            break;
+        }
+
+        QJsonObject item = value.toObject();
+
+        if (m_mode == Mode::Exception) {
+            m_table->setItem(row, 0, new QTableWidgetItem(QString::number(item.value("id").toInt())));
+            m_table->setItem(row, 1, new QTableWidgetItem(QStringLiteral("通道%1").arg(item.value("channel_id").toInt())));
+            m_table->setItem(row, 2, new QTableWidgetItem(item.value("related_videopath").toString()));
+            m_table->setItem(row, 3, new QTableWidgetItem(item.value("event_time").toString()));
+        }
+        else {
+            m_table->setItem(row, 0, new QTableWidgetItem(QString::number(item.value("id").toInt())));
+            m_table->setItem(row, 1, new QTableWidgetItem(item.value("operation_desc").toString()));
+            m_table->setItem(row, 2, new QTableWidgetItem(QString::number(item.value("admin_id").toInt())));
+            m_table->setItem(row, 3, new QTableWidgetItem(item.value("operation_time").toString()));
+        }
+        ++row;
+    }
+    m_totalPage = qMax(1, (totalCount + m_pageSize - 1) / m_pageSize);
+
+    m_lab_page->setText(QString("%1 / %2").arg(m_curPage).arg(m_totalPage));
+    m_btn_prev->setEnabled(m_curPage > 1);
+    m_btn_next->setEnabled(m_curPage < m_totalPage);
+
+    updateModeButtonState();
+
 }
